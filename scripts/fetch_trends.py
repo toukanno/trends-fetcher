@@ -23,6 +23,7 @@ TRENDS_DIR = ROOT / "trends"
 DATA_DIR = ROOT / "data"
 SEEN_FILE = DATA_DIR / "seen.json"
 README = ROOT / "README.md"
+PROPOSALS_DIR = ROOT / "proposals"
 
 WINDOW_DAYS = 7
 MIN_STARS = 25
@@ -89,6 +90,59 @@ def save_seen(seen: set[str]) -> None:
     SEEN_FILE.write_text(json.dumps(sorted(seen), indent=2) + "\n")
 
 
+
+
+def build_proposal(item: dict) -> str:
+    """Create a concise application proposal from repository metadata."""
+    name = item["full_name"].split("/")[-1]
+    lang = item.get("language")
+    desc = (item.get("description") or "").strip()
+
+    if any(k in desc.lower() for k in ("agent", "assistant", "llm", "ai")):
+        focus = "AI-assisted feature or internal automation"
+    elif any(k in desc.lower() for k in ("api", "sdk", "service")):
+        focus = "backend integration or API product"
+    elif any(k in desc.lower() for k in ("ui", "frontend", "design", "web")):
+        focus = "web user experience improvement"
+    elif any(k in desc.lower() for k in ("data", "analytics", "pipeline")):
+        focus = "data pipeline and analytics workflow"
+    else:
+        focus = "rapid prototype for new app capabilities"
+
+    lang_hint = f" with {lang}" if lang else ""
+    return f"Pilot `{name}` as a {focus}{lang_hint}."
+
+
+def append_proposals_section(now: datetime, new_items: list[dict]) -> Path:
+    PROPOSALS_DIR.mkdir(parents=True, exist_ok=True)
+    today = now.date().isoformat()
+    path = PROPOSALS_DIR / f"{today}.md"
+
+    lines: list[str] = []
+    if not path.exists():
+        lines.append(f"# App repository proposals — {today}")
+        lines.append("")
+        lines.append("Run-by-run application proposals derived from trending repositories.")
+        lines.append("")
+
+    time_label = now.strftime("%H:%M UTC")
+    lines.append(f"## {time_label} — {len(new_items)} proposals")
+    lines.append("")
+    if not new_items:
+        lines.append("- No new repositories in this run. Revisit previous proposals and reprioritize roadmap.")
+    else:
+        for item in new_items:
+            repo = item["full_name"]
+            url = item["html_url"]
+            proposal = build_proposal(item)
+            lines.append(f"- **[{repo}]({url})**: {proposal}")
+    lines.append("")
+
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
 def format_row(item: dict) -> str:
     name = item["full_name"]
     url = item["html_url"]
@@ -153,6 +207,16 @@ def rebuild_index() -> None:
     else:
         for f in files:
             lines.append(f"- [{f.stem}](trends/{f.name})")
+
+    proposal_files = sorted(PROPOSALS_DIR.glob("*.md"), reverse=True)
+    lines.append("")
+    lines.append("## App proposals")
+    lines.append("")
+    if not proposal_files:
+        lines.append("_No proposal runs yet._")
+    else:
+        for f in proposal_files:
+            lines.append(f"- [{f.stem}](proposals/{f.name})")
     lines.append("")
     README.write_text("\n".join(lines))
 
@@ -171,9 +235,12 @@ def main() -> int:
     new_items = [it for it in all_items.values() if it["full_name"] not in seen]
     new_items.sort(key=lambda it: it.get("stargazers_count", 0), reverse=True)
 
+    proposal_path = append_proposals_section(now, new_items)
+
     if not new_items:
         print("No new trending repositories since last run.")
         rebuild_index()
+        print(f"Updated proposals in {proposal_path.relative_to(ROOT)}.")
         return 0
 
     path = append_run_section(now, since, new_items)
@@ -181,6 +248,7 @@ def main() -> int:
     save_seen(seen)
     rebuild_index()
     print(f"Appended {len(new_items)} new repos to {path.relative_to(ROOT)}.")
+    print(f"Updated proposals in {proposal_path.relative_to(ROOT)}.")
     return 0
 
 
