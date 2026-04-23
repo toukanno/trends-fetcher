@@ -30,6 +30,15 @@ MIN_STARS = 25
 PER_PAGE = 50
 MAX_PAGES = 4
 LANGUAGES: tuple[str | None, ...] = (None,)  # None = all languages
+TYPE_SCRIPT = "TypeScript"
+
+GENRE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "ゲーム": ("game", "gaming", "unity", "unreal", "retro", "steam", "rpg"),
+    "AI/エージェント": ("agent", "assistant", "llm", "ai", "rag", "mcp"),
+    "開発者ツール": ("cli", "sdk", "plugin", "devtool", "developer", "tooling"),
+    "データ/分析": ("data", "analytics", "pipeline", "dataset", "visualization"),
+    "インフラ/バックエンド": ("api", "server", "database", "postgres", "cloud", "worker"),
+}
 
 
 def _request(url: str, token: str | None) -> dict:
@@ -113,6 +122,28 @@ def build_proposal(item: dict) -> str:
     return f"Pilot `{name}` as a {focus}{lang_hint}."
 
 
+def _combined_text(item: dict) -> str:
+    desc = item.get("description") or ""
+    name = item.get("name") or ""
+    full_name = item.get("full_name") or ""
+    return f"{name} {full_name} {desc}".lower()
+
+
+def classify_genre(item: dict) -> str:
+    text = _combined_text(item)
+    for genre, keywords in GENRE_KEYWORDS.items():
+        if any(k in text for k in keywords):
+            return genre
+    return "その他"
+
+
+def branch_suggestion(item: dict) -> str:
+    base = (item.get("name") or "repo").lower()
+    sanitized = "".join(ch if ch.isalnum() else "-" for ch in base).strip("-")
+    sanitized = "-".join(part for part in sanitized.split("-") if part)
+    return f"spike/{sanitized[:28] or 'repo'}"
+
+
 def append_proposals_section(now: datetime, new_items: list[dict]) -> Path:
     PROPOSALS_DIR.mkdir(parents=True, exist_ok=True)
     today = now.date().isoformat()
@@ -131,11 +162,35 @@ def append_proposals_section(now: datetime, new_items: list[dict]) -> Path:
     if not new_items:
         lines.append("- No new repositories in this run. Revisit previous proposals and reprioritize roadmap.")
     else:
+        by_genre: dict[str, list[dict]] = {}
         for item in new_items:
-            repo = item["full_name"]
-            url = item["html_url"]
-            proposal = build_proposal(item)
-            lines.append(f"- **[{repo}]({url})**: {proposal}")
+            genre = classify_genre(item)
+            by_genre.setdefault(genre, []).append(item)
+
+        for genre in ("ゲーム", "AI/エージェント", "開発者ツール", "データ/分析", "インフラ/バックエンド", "その他"):
+            bucket = by_genre.get(genre, [])
+            if not bucket:
+                continue
+            lines.append(f"### {genre} ({len(bucket)})")
+            lines.append("")
+            for item in bucket[:15]:
+                repo = item["full_name"]
+                url = item["html_url"]
+                proposal = build_proposal(item)
+                branch = branch_suggestion(item)
+                lines.append(f"- **[{repo}]({url})**: {proposal} 推奨検証ブランチ: `{branch}`。")
+            lines.append("")
+
+        ts_items = [item for item in new_items if item.get("language") == TYPE_SCRIPT]
+        if ts_items:
+            lines.append(f"### TypeScript注目枠 ({len(ts_items)})")
+            lines.append("")
+            for item in ts_items[:10]:
+                repo = item["full_name"]
+                url = item["html_url"]
+                stars = item.get("stargazers_count", 0)
+                branch = branch_suggestion(item)
+                lines.append(f"- **[{repo}]({url})** / ⭐ {stars:,} / branch `{branch}`")
     lines.append("")
 
     with path.open("a", encoding="utf-8") as fh:
