@@ -2,8 +2,8 @@ name: Fetch trending repositories
 
 on:
   schedule:
-    # Every 2 hours, offset 15 min to dodge top-of-hour cron contention.
-    - cron: "15 */2 * * *"
+    # Every 3 hours, offset 15 min to dodge top-of-hour cron contention.
+    - cron: "15 */3 * * *"
   workflow_dispatch:
 
 permissions:
